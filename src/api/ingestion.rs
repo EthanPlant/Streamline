@@ -1,6 +1,8 @@
 use actix_web::{HttpResponse, ResponseError, post, web::Json};
+use chrono::{TimeZone, Utc};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
+use tracing::info;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LogPlayload {
@@ -52,7 +54,18 @@ impl ResponseError for IngestionError {
 async fn ingest_log(payload: Json<LogPlayload>) -> Result<HttpResponse, IngestionError> {
     let log = payload.into_inner();
     log.validate()?;
-    println!("Received log: {log:?}");
+    let ts = Utc
+        .timestamp_opt(log.timestamp, 0)
+        .single()
+        .unwrap_or_else(Utc::now);
+
+    info!(
+        level = %log.level,
+        service = %log.service,
+        message = %log.message,
+        timestamp = %ts.to_rfc3339(),
+        "Received log entry"
+    );
     Ok(HttpResponse::Created().body("Log received"))
 }
 

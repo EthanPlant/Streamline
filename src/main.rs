@@ -1,8 +1,7 @@
 use actix_web::{App, HttpServer};
+use streamline::api;
 use tracing::info;
 use tracing_subscriber::EnvFilter;
-
-mod api;
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {

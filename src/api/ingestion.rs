@@ -1,5 +1,6 @@
-use actix_web::{HttpResponse, Responder, post, web::Json};
+use actix_web::{HttpResponse, ResponseError, post, web::Json};
 use serde::{Deserialize, Serialize};
+use thiserror::Error;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LogPlayload {
@@ -10,36 +11,49 @@ pub struct LogPlayload {
 }
 
 impl LogPlayload {
-    pub fn validate(&self) -> Result<(), &'static str> {
+    pub fn validate(&self) -> Result<(), IngestionError> {
         if self.service.trim().is_empty() {
-            return Err("Service cannot be empty");
+            return Err(IngestionError::ValidationError(
+                "Service cannot be empty".into(),
+            ));
         }
         if self.level.trim().is_empty() {
-            return Err("Level cannot be empty");
+            return Err(IngestionError::ValidationError(
+                "Level cannot be empty".into(),
+            ));
         }
         if self.message.trim().is_empty() {
-            return Err("Message cannot be empty");
+            return Err(IngestionError::ValidationError(
+                "Message cannot be empty".into(),
+            ));
         }
 
         Ok(())
     }
 }
 
-#[post("/logs")]
-async fn ingest_log(log: Json<LogPlayload>) -> impl Responder {
-    match log.validate() {
-        Ok(_) => {
-            println!(
-                "Received log: [{}], {} - {}",
-                log.level, log.service, log.message
-            );
-            HttpResponse::Created().body("Log received")
-        }
-        Err(e) => {
-            println!("Validation error: {}", e);
-            HttpResponse::BadRequest().body(format!("Invalid log payload: {}", e))
+#[derive(Debug, Error)]
+pub enum IngestionError {
+    #[error("Validation error: {0}")]
+    ValidationError(String),
+}
+
+impl ResponseError for IngestionError {
+    fn error_response(&self) -> HttpResponse {
+        match self {
+            IngestionError::ValidationError(msg) => {
+                HttpResponse::BadRequest().body(msg.to_string())
+            }
         }
     }
+}
+
+#[post("/logs")]
+async fn ingest_log(payload: Json<LogPlayload>) -> Result<HttpResponse, IngestionError> {
+    let log = payload.into_inner();
+    log.validate()?;
+    println!("Received log: {log:?}");
+    Ok(HttpResponse::Created().body("Log received"))
 }
 
 #[cfg(test)]
@@ -132,5 +146,65 @@ mod tests {
 
         let resp = test::call_service(&app, req).await;
         assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[actix_web::test]
+    async fn test_endpoint_missing_field() {
+        let app = test::init_service(App::new().configure(init_routes)).await;
+
+        let payload = serde_json::json!({
+            "timestamp": 0,
+            "service": "test-service",
+            "level": "INFO"
+        });
+
+        let req = test::TestRequest::post()
+            .uri("/logs")
+            .set_json(&payload)
+            .to_request();
+
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[actix_web::test]
+    async fn test_endpoint_wrong_type() {
+        let app = test::init_service(App::new().configure(init_routes)).await;
+
+        let payload = serde_json::json!({
+            "timestamp": "not-a-timestamp",
+            "service": "test-service",
+            "level": "INFO",
+            "message": "This is a test log"
+        });
+
+        let req = test::TestRequest::post()
+            .uri("/logs")
+            .set_json(&payload)
+            .to_request();
+
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[actix_web::test]
+    async fn test_endpoint_extra_field() {
+        let app = test::init_service(App::new().configure(init_routes)).await;
+
+        let payload = serde_json::json!({
+            "timestamp": 0,
+            "service": "test-service",
+            "level": "INFO",
+            "message": "This is a test log",
+            "extra_field": "extra_value"
+        });
+
+        let req = test::TestRequest::post()
+            .uri("/logs")
+            .set_json(&payload)
+            .to_request();
+
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), StatusCode::CREATED);
     }
 }

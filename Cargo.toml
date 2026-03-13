@@ -10,6 +10,7 @@ path = "src/lib.rs"
 [dependencies]
 actix-web = "4.13.0"
 chrono = { version = "0.4.44", features = ["serde"] }
+futures = "0.3.32"
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.149"
 tantivy = "0.25.0"

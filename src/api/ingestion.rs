@@ -4,15 +4,27 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tracing::info;
 
+/// Representation of a log event delivered to `POST /logs`.
+///
+/// This payload type is serializable via `serde` and is currently the canonical
+/// ingestion structure for the Streamline API.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LogPlayload {
+    /// UNIX timestamp in seconds.
     pub timestamp: i64,
+    /// Service name producing the log.
     pub service: String,
+    /// Log level, e.g. `INFO`, `WARN`, `ERROR`.
     pub level: String,
+    /// Log message body.
     pub message: String,
 }
 
 impl LogPlayload {
+    /// Validate required fields.
+    ///
+    /// Returns `Ok(())` when all fields are non-empty (except timestamp).
+    /// Returns `IngestionError::ValidationError` with a description otherwise.
     pub fn validate(&self) -> Result<(), IngestionError> {
         if self.service.trim().is_empty() {
             return Err(IngestionError::ValidationError(
@@ -34,6 +46,7 @@ impl LogPlayload {
     }
 }
 
+/// Ingestion-level errors returned to API callers.
 #[derive(Debug, Error)]
 pub enum IngestionError {
     #[error("Validation error: {0}")]
@@ -41,6 +54,7 @@ pub enum IngestionError {
 }
 
 impl ResponseError for IngestionError {
+    /// Maps ingestion errors to HTTP status responses.
     fn error_response(&self) -> HttpResponse {
         match self {
             IngestionError::ValidationError(msg) => {
@@ -50,6 +64,10 @@ impl ResponseError for IngestionError {
     }
 }
 
+/// API handler for ingesting logs into Streamline.
+///
+/// Accepts a `LogPlayload` JSON object and validates required fields. Current
+/// behavior logs an info event and returns HTTP 201 on success.
 #[post("/logs")]
 async fn ingest_log(payload: Json<LogPlayload>) -> Result<HttpResponse, IngestionError> {
     let log = payload.into_inner();
